@@ -1,4 +1,6 @@
-https://youtu.be/ptFUDhXQyyw
+![full hd](https://github.com/user-attachments/assets/a87c09f8-28e1-4f7c-9501-dbbe45a364a5)
+
+[https://youtu.be/ptFUDhXQyyw](https://youtu.be/ptFUDhXQyyw)
 
 📌 Key Features:
 Alt + ←/→ Arrow Keys — navigate to previous or next connected node (input/output).
@@ -38,4 +40,5 @@ Alt + нажатие колёсика мыши (СКМ) — также вызы�
 Опциональное автоцентрирование камеры на выбранном узле.
 
 Настройка "Auto-center view" — автоматическое приближение к выбранному узлу.
+
 
