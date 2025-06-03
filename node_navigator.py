@@ -1,10 +1,14 @@
 bl_info = {
     "name": "Node Navigator",
     "author": "ChatGPT and duhazzz",
-    "version": (1, 9),
+    "version": (1, 8),
     "blender": (3, 0, 0),
     "location": "Node Editor > N Panel > Node Navigator",
-    "description": "Navigate between nodes with hotkeys and popup panel",
+    "description": (
+        "Navigate between connected nodes using popup panel.\n"
+        "Popup panel allows fast selection and auto-centering of view on selected node.\n"
+        "Works without hotkeys, accessed via a button in the N panel."
+    ),
     "category": "Node",
 }
 
@@ -12,8 +16,6 @@ import bpy
 from bpy.types import Operator, Panel, PropertyGroup
 from bpy.props import BoolProperty, StringProperty, PointerProperty, EnumProperty
 
-# Глобальная переменная для хранения keymap
-addon_keymaps = []
 
 def get_connected_nodes(node, direction="NEXT"):
     connected = []
@@ -29,46 +31,59 @@ def get_connected_nodes(node, direction="NEXT"):
                     connected.append(link.from_node)
     return connected
 
+
 class NODE_OT_move_connected(Operator):
     bl_idname = "node.move_connected"
     bl_label = "Move to Connected Node"
-    bl_options = {'REGISTER'}
+    bl_options = {'REGISTER'}  # Убрали 'UNDO' чтобы отключить запись в историю
 
     direction: EnumProperty(
-        items=[("LEFT", "Previous", ""),
-               ("RIGHT", "Next", "")],
+        items=[
+            ("LEFT", "Previous", "Go to previous (input) node"),
+            ("RIGHT", "Next", "Go to next (output) node"),
+        ],
         default="RIGHT"
     )
 
     def execute(self, context):
         space = context.space_data
         if space.type != 'NODE_EDITOR':
+            self.report({'WARNING'}, "Not in Node Editor")
             return {'CANCELLED'}
 
         tree = space.edit_tree
-        active_node = tree.nodes.active if tree else None
-
-        if not active_node:
+        if not tree:
             return {'CANCELLED'}
 
-        connected = get_connected_nodes(active_node, 
-                                     "PREV" if self.direction == "LEFT" else "NEXT")
+        active_node = tree.nodes.active
 
-        if connected:
-            for node in tree.nodes:
-                node.select = False
-            connected[0].select = True
-            tree.nodes.active = connected[0]
-            
-            if context.scene.node_navigator_settings.auto_center:
-                bpy.ops.node.view_selected()
+        if not active_node:
+            self.report({'INFO'}, "No active node")
+            return {'CANCELLED'}
+
+        dir_key = "PREV" if self.direction == "LEFT" else "NEXT"
+        connected = get_connected_nodes(active_node, dir_key)
+
+        if not connected:
+            self.report({'INFO'}, "No connected node found")
+            return {'CANCELLED'}
+
+        target_node = connected[0]
+        for node in tree.nodes:
+            node.select = False
+        target_node.select = True
+        tree.nodes.active = target_node
+
+        if context.scene.node_navigator_settings.auto_center:
+            bpy.ops.node.view_selected()
 
         return {'FINISHED'}
+
 
 class NODE_OT_select_specific_connected(Operator):
     bl_idname = "node.select_specific_connected"
     bl_label = "Select Connected Node"
-    bl_options = {'REGISTER'}
+    bl_options = {'REGISTER'}  # Также убрали 'UNDO' для этого оператора
 
     node_name: StringProperty()
 
@@ -82,7 +97,10 @@ class NODE_OT_select_specific_connected(Operator):
             tree.nodes.active = node
             if context.scene.node_navigator_settings.auto_center:
                 bpy.ops.node.view_selected()
-        return {'FINISHED'}
+            return {'FINISHED'}
+        self.report({'WARNING'}, f"Node '{self.node_name}' not found")
+        return {'CANCELLED'}
+
 
 class NODE_MT_node_navigator_popup(Panel):
     bl_idname = "NODE_MT_node_navigator_popup"
@@ -98,44 +116,50 @@ class NODE_MT_node_navigator_popup(Panel):
             layout.label(text="No active node", icon='ERROR')
             return
 
+        # Добавляем кнопки навигации
         row = layout.row(align=True)
-        row.operator("node.move_connected", text="", icon='TRIA_LEFT').direction = 'LEFT'
-        row.operator("node.move_connected", text="", icon='TRIA_RIGHT').direction = 'RIGHT'
+        row.operator("node.move_connected", text="Previous Node", icon='TRIA_LEFT').direction = 'LEFT'
+        row.operator("node.move_connected", text="Next Node", icon='TRIA_RIGHT').direction = 'RIGHT'
         
         layout.separator()
-        layout.label(text=f"Active: {node.name}", icon='NODE')
+        layout.label(text=f"Active Node: {node.name}", icon='NODE')
         layout.separator()
 
         next_nodes = get_connected_nodes(node, "NEXT")
         prev_nodes = get_connected_nodes(node, "PREV")
 
         row = layout.row()
+        col_inputs = row.column()
+        col_outputs = row.column()
+
         if prev_nodes:
-            col = row.column()
-            col.label(text="Inputs:")
+            col_inputs.label(text="Inputs:")
             for n in prev_nodes:
-                col.operator("node.select_specific_connected", text=n.name).node_name = n.name
+                col_inputs.operator("node.select_specific_connected", text=n.name).node_name = n.name
         else:
-            row.label(text="No inputs")
+            col_inputs.label(text="No input nodes")
 
         if next_nodes:
-            col = row.column()
-            col.label(text="Outputs:")
+            col_outputs.label(text="Outputs:")
             for n in next_nodes:
-                col.operator("node.select_specific_connected", text=n.name).node_name = n.name
+                col_outputs.operator("node.select_specific_connected", text=n.name).node_name = n.name
         else:
-            row.label(text="No outputs")
+            col_outputs.label(text="No output nodes")
+
 
 class NODE_OT_show_node_navigator(Operator):
     bl_idname = "node.show_node_navigator"
     bl_label = "Show Node Navigator"
-    bl_options = {'REGISTER'}
+    bl_options = {'REGISTER'}  # Убрали 'UNDO'
 
     def execute(self, context):
-        if context.space_data.edit_tree.nodes.active:
-            bpy.ops.wm.call_panel(name="NODE_MT_node_navigator_popup", keep_open=False)
-            return {'FINISHED'}
-        return {'CANCELLED'}
+        if not context.space_data.edit_tree.nodes.active:
+            self.report({'WARNING'}, "No active node selected")
+            return {'CANCELLED'}
+
+        bpy.ops.wm.call_panel(name="NODE_MT_node_navigator_popup", keep_open=False)
+        return {'FINISHED'}
+
 
 class NODE_PT_navigator_panel(Panel):
     bl_label = "Node Navigator"
@@ -146,9 +170,12 @@ class NODE_PT_navigator_panel(Panel):
     def draw(self, context):
         layout = self.layout
         settings = context.scene.node_navigator_settings
+        
+        # Настройка автовыравнивания в N-панели
         layout.prop(settings, "auto_center")
         layout.separator()
         layout.operator("node.show_node_navigator", icon='NODE')
+
 
 class NodeNavigatorSettings(PropertyGroup):
     auto_center: BoolProperty(
@@ -156,6 +183,7 @@ class NodeNavigatorSettings(PropertyGroup):
         description="Automatically center the view on selected node",
         default=True
     )
+
 
 classes = (
     NodeNavigatorSettings,
@@ -166,42 +194,18 @@ classes = (
     NODE_PT_navigator_panel,
 )
 
-def register_keymap():
-    wm = bpy.context.window_manager
-    kc = wm.keyconfigs.addon
-    if kc:
-        km = kc.keymaps.new(name='Node Editor', space_type='NODE_EDITOR')
-        
-        # Назначение горячих клавиш
-        kmi_prev = km.keymap_items.new("node.move_connected", 'LEFT_ARROW', 'PRESS', alt=True)
-        kmi_prev.properties.direction = 'LEFT'
-        
-        kmi_next = km.keymap_items.new("node.move_connected", 'RIGHT_ARROW', 'PRESS', alt=True)
-        kmi_next.properties.direction = 'RIGHT'
-        
-        kmi_show = km.keymap_items.new("node.show_node_navigator", 'UP_ARROW', 'PRESS', alt=True)
-        
-        addon_keymaps.append((km, kmi_prev))
-        addon_keymaps.append((km, kmi_next))
-        addon_keymaps.append((km, kmi_show))
-
-def unregister_keymap():
-    for km, kmi in addon_keymaps:
-        km.keymap_items.remove(kmi)
-    addon_keymaps.clear()
 
 def register():
     for cls in classes:
         bpy.utils.register_class(cls)
-    
     bpy.types.Scene.node_navigator_settings = PointerProperty(type=NodeNavigatorSettings)
-    register_keymap()
+
 
 def unregister():
-    unregister_keymap()
     for cls in reversed(classes):
         bpy.utils.unregister_class(cls)
     del bpy.types.Scene.node_navigator_settings
+
 
 if __name__ == "__main__":
     register()
